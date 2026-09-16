@@ -9,9 +9,10 @@ type Selected =
 
 const CENTER = 500
 const DEPT_RADIUS = 200
-const AGENT_RADIUS = 400
-const AGENT_RADIUS_STAGGER = 55
-const MAX_AGENT_ARC_DEGREES = (360 / 7) * 0.82
+const AGENT_RADIUS = 355
+const AGENT_RADIUS_TIERS = 3
+const AGENT_RADIUS_STAGGER = 40
+const MAX_AGENT_ARC_DEGREES = (360 / 7) * 0.88
 
 function toPoint(angleDeg: number, radius: number) {
   const rad = (angleDeg - 90) * (Math.PI / 180)
@@ -35,11 +36,11 @@ export default function App() {
       const angle = i * step
       const deptPoint = toPoint(angle, DEPT_RADIUS)
       const agentCount = dept.agents.length
-      const spread = Math.min(MAX_AGENT_ARC_DEGREES, agentCount * 11)
+      const spread = Math.min(MAX_AGENT_ARC_DEGREES, agentCount * 9)
       const agentPoints = dept.agents.map((agent, j) => {
         const start = angle - spread / 2
         const agentAngle = agentCount === 1 ? angle : start + (spread * j) / (agentCount - 1)
-        const radius = AGENT_RADIUS + (j % 2 === 0 ? 0 : AGENT_RADIUS_STAGGER)
+        const radius = AGENT_RADIUS + (j % AGENT_RADIUS_TIERS) * AGENT_RADIUS_STAGGER
         return { agent, point: toPoint(agentAngle, radius) }
       })
       return { dept, angle, point: deptPoint, agentPoints }
