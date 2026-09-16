@@ -1,11 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { companyBrain, departments, type Agent, type Department } from './data/company'
+import { greetingFor, leaderReply, orchestratorReply } from './lib/orchestrate'
+import type { ChatMessage, Task } from './types'
+import ChatPanel from './components/ChatPanel'
+import TasksBoard from './components/TasksBoard'
 import './App.css'
 
 type Selected =
   | { kind: 'brain' }
   | { kind: 'department'; department: Department }
   | { kind: 'agent'; department: Department; agent: Agent }
+
+type View = 'map' | 'tasks'
+
+const BRAIN_ID = 'brain'
 
 const CENTER = 500
 const DEPT_RADIUS = 200
@@ -26,9 +34,18 @@ function wrapLabel(name: string): string[] {
   return [words.slice(0, mid).join(' '), words.slice(mid).join(' ')]
 }
 
+function makeId() {
+  return Math.random().toString(36).slice(2, 10)
+}
+
 export default function App() {
+  const [view, setView] = useState<View>('map')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [selected, setSelected] = useState<Selected>({ kind: 'brain' })
+  const [chats, setChats] = useState<Record<string, ChatMessage[]>>({})
+  const [typing, setTyping] = useState<Record<string, boolean>>({})
+  const [tasks, setTasks] = useState<Task[]>([])
+  const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   const layout = useMemo(() => {
     const step = 360 / departments.length
@@ -49,153 +66,248 @@ export default function App() {
 
   const isExpanded = (id: string) => expanded === id
 
+  // Advance running tasks over time to simulate agents working.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTasks((prev) =>
+        prev.map((task) => {
+          if (task.status === 'done') return task
+          const progress = Math.min(100, task.progress + 8 + Math.random() * 14)
+          return { ...task, progress, status: progress >= 100 ? 'done' : 'running' }
+        }),
+      )
+    }, 1200)
+    return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    const timers = typingTimers.current
+    return () => {
+      Object.values(timers).forEach(clearTimeout)
+    }
+  }, [])
+
+  function ensureGreeting(targetId: string, name: string, mission: string) {
+    setChats((prev) => {
+      if (prev[targetId]) return prev
+      return {
+        ...prev,
+        [targetId]: [{ id: makeId(), role: 'agent', text: greetingFor(name, mission), ts: Date.now() }],
+      }
+    })
+  }
+
+  useEffect(() => {
+    if (selected.kind === 'brain') {
+      ensureGreeting(BRAIN_ID, 'Orchestrator', companyBrain.mission)
+    } else if (selected.kind === 'department') {
+      ensureGreeting(selected.department.id, `${selected.department.name} Lead`, selected.department.mission)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected])
+
+  function handleSend(targetId: string, isBrain: boolean, dept: Department | undefined, text: string) {
+    const userMsg: ChatMessage = { id: makeId(), role: 'user', text, ts: Date.now() }
+    setChats((prev) => ({ ...prev, [targetId]: [...(prev[targetId] ?? []), userMsg] }))
+    setTyping((prev) => ({ ...prev, [targetId]: true }))
+
+    clearTimeout(typingTimers.current[targetId])
+    typingTimers.current[targetId] = setTimeout(
+      () => {
+        const { reply, task } = isBrain ? orchestratorReply(text, departments) : leaderReply(dept!, text)
+        const agentMsg: ChatMessage = { id: makeId(), role: 'agent', text: reply, ts: Date.now() }
+        setChats((prev) => ({ ...prev, [targetId]: [...(prev[targetId] ?? []), agentMsg] }))
+        setTyping((prev) => ({ ...prev, [targetId]: false }))
+        if (task) {
+          const newTask: Task = { ...task, id: makeId(), progress: 0, status: 'running', createdAt: Date.now() }
+          setTasks((prev) => [newTask, ...prev].slice(0, 24))
+        }
+      },
+      500 + Math.random() * 500,
+    )
+  }
+
+  const runningCount = tasks.filter((t) => t.status === 'running').length
+
   return (
     <div className="app">
       <header className="header">
-        <h1>Agent Company Map</h1>
-        <p>Click a department to expand its agents. Click an agent to open its skill.</p>
+        <div className="header-top">
+          <h1>Agent Company Map</h1>
+          <nav className="tabs">
+            <button className={view === 'map' ? 'is-active' : ''} onClick={() => setView('map')}>
+              Map
+            </button>
+            <button className={view === 'tasks' ? 'is-active' : ''} onClick={() => setView('tasks')}>
+              Tasks{runningCount > 0 && <span className="tab-badge">{runningCount}</span>}
+            </button>
+          </nav>
+        </div>
+        <p>
+          {view === 'map'
+            ? 'Click a department to expand its agents. Select the brain or a department to chat with its lead.'
+            : 'Live progress of tasks delegated to department teams.'}
+        </p>
       </header>
 
-      <div className="stage">
-        <svg viewBox="0 0 1000 1000" className="map" role="img" aria-label="Company agent map">
-          {layout.map(({ dept, point }) => (
-            <line
-              key={`brain-${dept.id}`}
-              x1={CENTER}
-              y1={CENTER}
-              x2={point.x}
-              y2={point.y}
-              className="edge edge-brain"
-            />
-          ))}
-
-          {layout.map(
-            ({ dept, point, agentPoints }) =>
-              isExpanded(dept.id) &&
-              agentPoints.map(({ agent, point: ap }) => (
+      {view === 'tasks' ? (
+        <div className="tasks-view">
+          <TasksBoard tasks={tasks} departments={departments} />
+        </div>
+      ) : (
+        <>
+          <div className="stage">
+            <svg viewBox="0 0 1000 1000" className="map" role="img" aria-label="Company agent map">
+              {layout.map(({ dept, point }) => (
                 <line
-                  key={`${dept.id}-${agent.id}`}
-                  x1={point.x}
-                  y1={point.y}
-                  x2={ap.x}
-                  y2={ap.y}
-                  className="edge edge-agent"
-                  style={{ stroke: dept.color }}
+                  key={`brain-${dept.id}`}
+                  x1={CENTER}
+                  y1={CENTER}
+                  x2={point.x}
+                  y2={point.y}
+                  className="edge edge-brain"
                 />
-              )),
-          )}
+              ))}
 
-          <g
-            className={`node node-brain ${selected.kind === 'brain' ? 'is-selected' : ''}`}
-            transform={`translate(${CENTER}, ${CENTER})`}
-            onClick={() => setSelected({ kind: 'brain' })}
-          >
-            <circle r={54} />
-            <text y={-4}>🧠</text>
-            <text y={18} className="node-label">
-              Company Brain
-            </text>
-          </g>
+              {layout.map(
+                ({ dept, point, agentPoints }) =>
+                  isExpanded(dept.id) &&
+                  agentPoints.map(({ agent, point: ap }) => (
+                    <line
+                      key={`${dept.id}-${agent.id}`}
+                      x1={point.x}
+                      y1={point.y}
+                      x2={ap.x}
+                      y2={ap.y}
+                      className="edge edge-agent"
+                      style={{ stroke: dept.color }}
+                    />
+                  )),
+              )}
 
-          {layout.map(({ dept, point, agentPoints }) => (
-            <g key={dept.id}>
               <g
-                className={`node node-dept ${isExpanded(dept.id) ? 'is-expanded' : ''} ${
-                  selected.kind === 'department' && selected.department.id === dept.id ? 'is-selected' : ''
-                }`}
-                style={{ ['--dept-color' as string]: dept.color }}
-                transform={`translate(${point.x}, ${point.y})`}
-                onClick={() => {
-                  setExpanded((cur) => (cur === dept.id ? null : dept.id))
-                  setSelected({ kind: 'department', department: dept })
-                }}
+                className={`node node-brain ${selected.kind === 'brain' ? 'is-selected' : ''}`}
+                transform={`translate(${CENTER}, ${CENTER})`}
+                onClick={() => setSelected({ kind: 'brain' })}
               >
-                <circle r={40} />
-                <text y={-2}>{dept.icon}</text>
-                <text y={16} className="node-label">
-                  {dept.name}
+                <circle r={54} />
+                <text y={-4}>🧠</text>
+                <text y={18} className="node-label">
+                  Company Brain
                 </text>
               </g>
 
-              {isExpanded(dept.id) &&
-                agentPoints.map(({ agent, point: ap }) => (
+              {layout.map(({ dept, point, agentPoints }) => (
+                <g key={dept.id}>
                   <g
-                    key={agent.id}
-                    className={`node node-agent ${
-                      selected.kind === 'agent' && selected.agent.id === agent.id ? 'is-selected' : ''
+                    className={`node node-dept ${isExpanded(dept.id) ? 'is-expanded' : ''} ${
+                      selected.kind === 'department' && selected.department.id === dept.id ? 'is-selected' : ''
                     }`}
                     style={{ ['--dept-color' as string]: dept.color }}
-                    transform={`translate(${ap.x}, ${ap.y})`}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setSelected({ kind: 'agent', department: dept, agent })
+                    transform={`translate(${point.x}, ${point.y})`}
+                    onClick={() => {
+                      setExpanded((cur) => (cur === dept.id ? null : dept.id))
+                      setSelected({ kind: 'department', department: dept })
                     }}
                   >
-                    <circle r={20} />
-                    <text
-                      y={20 + 11}
-                      className="node-label node-label-agent"
-                    >
-                      {wrapLabel(agent.name).map((line, li) => (
-                        <tspan key={li} x={0} dy={li === 0 ? 0 : 11}>
-                          {line}
-                        </tspan>
-                      ))}
+                    <circle r={40} />
+                    <text y={-2}>{dept.icon}</text>
+                    <text y={16} className="node-label">
+                      {dept.name}
                     </text>
                   </g>
-                ))}
-            </g>
-          ))}
-        </svg>
-      </div>
 
-      <aside className="panel">
-        {selected.kind === 'brain' && (
-          <>
-            <h2>🧠 {companyBrain.name}</h2>
-            <p>{companyBrain.mission}</p>
-          </>
-        )}
-        {selected.kind === 'department' && (
-          <>
-            <h2>
-              {selected.department.icon} {selected.department.name}
-            </h2>
-            <p>{selected.department.mission}</p>
-            <h3>Agents</h3>
-            <ul className="agent-list">
-              {selected.department.agents.map((agent) => (
-                <li key={agent.id}>
-                  <button
-                    onClick={() =>
-                      setSelected({ kind: 'agent', department: selected.department, agent })
-                    }
-                  >
-                    {agent.name}
-                  </button>
-                </li>
+                  {isExpanded(dept.id) &&
+                    agentPoints.map(({ agent, point: ap }) => (
+                      <g
+                        key={agent.id}
+                        className={`node node-agent ${
+                          selected.kind === 'agent' && selected.agent.id === agent.id ? 'is-selected' : ''
+                        }`}
+                        style={{ ['--dept-color' as string]: dept.color }}
+                        transform={`translate(${ap.x}, ${ap.y})`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelected({ kind: 'agent', department: dept, agent })
+                        }}
+                      >
+                        <circle r={20} />
+                        <text y={20 + 11} className="node-label node-label-agent">
+                          {wrapLabel(agent.name).map((line, li) => (
+                            <tspan key={li} x={0} dy={li === 0 ? 0 : 11}>
+                              {line}
+                            </tspan>
+                          ))}
+                        </text>
+                      </g>
+                    ))}
+                </g>
               ))}
-            </ul>
-          </>
-        )}
-        {selected.kind === 'agent' && (
-          <>
-            <div className="breadcrumb">
-              {selected.department.icon} {selected.department.name}
-            </div>
-            <h2>{selected.agent.name}</h2>
-            <p className="role">{selected.agent.role}</p>
-            <h3>Skill</h3>
-            <p className="skill">{selected.agent.skill}</p>
-            <button
-              className="copy-btn"
-              onClick={() => navigator.clipboard?.writeText(selected.agent.skill)}
-            >
-              Copy skill prompt
-            </button>
-          </>
-        )}
-      </aside>
+            </svg>
+          </div>
+
+          <aside className="panel">
+            {selected.kind === 'brain' && (
+              <>
+                <h2>🧠 Orchestrator</h2>
+                <p className="role">{companyBrain.name}</p>
+                <p>{companyBrain.mission}</p>
+                <ChatPanel
+                  color="#ffffff"
+                  messages={chats[BRAIN_ID] ?? []}
+                  isTyping={!!typing[BRAIN_ID]}
+                  onSend={(text) => handleSend(BRAIN_ID, true, undefined, text)}
+                />
+              </>
+            )}
+            {selected.kind === 'department' && (
+              <>
+                <h2>
+                  {selected.department.icon} {selected.department.name} Lead
+                </h2>
+                <p>{selected.department.mission}</p>
+                <h3>Agents</h3>
+                <ul className="agent-list">
+                  {selected.department.agents.map((agent) => (
+                    <li key={agent.id}>
+                      <button
+                        onClick={() =>
+                          setSelected({ kind: 'agent', department: selected.department, agent })
+                        }
+                      >
+                        {agent.name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <ChatPanel
+                  color={selected.department.color}
+                  messages={chats[selected.department.id] ?? []}
+                  isTyping={!!typing[selected.department.id]}
+                  onSend={(text) => handleSend(selected.department.id, false, selected.department, text)}
+                />
+              </>
+            )}
+            {selected.kind === 'agent' && (
+              <>
+                <div className="breadcrumb">
+                  {selected.department.icon} {selected.department.name}
+                </div>
+                <h2>{selected.agent.name}</h2>
+                <p className="role">{selected.agent.role}</p>
+                <h3>Skill</h3>
+                <p className="skill">{selected.agent.skill}</p>
+                <button
+                  className="copy-btn"
+                  onClick={() => navigator.clipboard?.writeText(selected.agent.skill)}
+                >
+                  Copy skill prompt
+                </button>
+              </>
+            )}
+          </aside>
+        </>
+      )}
     </div>
   )
 }

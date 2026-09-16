@@ -14,14 +14,63 @@
   text-align: left;
 }
 
+.header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
 .header h1 {
   font-size: 26px;
   letter-spacing: -0.4px;
+  margin: 0 0 8px;
 }
 
 .header p {
-  margin: 0;
+  margin: 8px 0 0;
   font-size: 14px;
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 13px;
+}
+
+.tabs button.is-active {
+  color: var(--text-h);
+  border-color: var(--text-h);
+}
+
+.tab-badge {
+  background: #fdb022;
+  color: #16171d;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 1px 6px;
+  min-width: 16px;
+  text-align: center;
+}
+
+.tasks-view {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  overflow-y: auto;
 }
 
 .stage {
