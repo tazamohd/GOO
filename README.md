@@ -9,6 +9,12 @@ Departments: Sales, Deals, Marketing, Operations, Intelligence, Customer, and
 Back Office — each modeled as a chain of narrow, composable agent skills
 rather than one do-everything bot.
 
+## Screenshots
+
+| Overview | Department expanded | Agent detail |
+| --- | --- | --- |
+| ![Overview of the map, showing the Company Brain at the center with 7 department nodes around it](docs/screenshots/overview.png) | ![Sales department expanded into its 10 agent nodes](docs/screenshots/department-expanded.png) | ![Detail panel for the Lead Scoring agent, showing its role and skill prompt](docs/screenshots/agent-detail.png) |
+
 ## Structure
 
 - `src/data/company.ts` — the data model: departments and their agents, each
