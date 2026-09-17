@@ -10,11 +10,54 @@
   margin: 0 0 6px;
 }
 
+.tasks-empty-feed {
+  padding: 0 28px;
+  margin: 0;
+  text-align: left;
+  font-size: 13px;
+  max-width: none;
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
 .tasks-board {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 14px;
   padding: 20px 28px;
+}
+
+.tasks-feed {
+  display: flex;
+  gap: 10px;
+  padding: 12px 28px;
+  overflow-x: auto;
+  height: 100%;
+  align-items: flex-start;
+}
+
+.task-card-feed {
+  flex: 0 0 220px;
+  padding: 10px 12px;
+}
+
+.task-card-feed .task-title {
+  font-size: 12px;
+  margin: 0 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-card-feed .task-card-header {
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.task-card-feed .task-meta {
+  font-size: 11px;
+  margin-bottom: 6px;
 }
 
 .task-card {

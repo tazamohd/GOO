@@ -11,8 +11,6 @@ type Selected =
   | { kind: 'department'; department: Department }
   | { kind: 'agent'; department: Department; agent: Agent }
 
-type View = 'map' | 'tasks'
-
 const BRAIN_ID = 'brain'
 
 const CENTER = 500
@@ -69,7 +67,6 @@ function makeId() {
 }
 
 export default function App() {
-  const [view, setView] = useState<View>('map')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [selected, setSelected] = useState<Selected>({ kind: 'brain' })
   const [chats, setChats] = useState<Record<string, ChatMessage[]>>({})
@@ -158,34 +155,39 @@ export default function App() {
   }
 
   const runningCount = tasks.filter((t) => t.status === 'running').length
+  const doneCount = tasks.length - runningCount
+  const totalAgents = departments.reduce((n, d) => n + d.agents.length, 0)
 
   return (
     <div className="app">
       <header className="header">
         <div className="header-top">
-          <h1>Agent Company Map</h1>
-          <nav className="tabs">
-            <button className={view === 'map' ? 'is-active' : ''} onClick={() => setView('map')}>
-              Map
-            </button>
-            <button className={view === 'tasks' ? 'is-active' : ''} onClick={() => setView('tasks')}>
-              Tasks{runningCount > 0 && <span className="tab-badge">{runningCount}</span>}
-            </button>
-          </nav>
+          <div className="header-title">
+            <span className={`status-dot ${runningCount > 0 ? 'status-dot-active' : ''}`} />
+            <h1>Agent Command Deck</h1>
+          </div>
+          <div className="hud-stats">
+            <span>
+              <strong>{departments.length}</strong> departments
+            </span>
+            <span>
+              <strong>{totalAgents}</strong> agents
+            </span>
+            <span className={runningCount > 0 ? 'hud-stat-active' : ''}>
+              <strong>{runningCount}</strong> active
+            </span>
+            <span>
+              <strong>{doneCount}</strong> done
+            </span>
+          </div>
         </div>
         <p>
-          {view === 'map'
-            ? 'Click a department to expand its agents. Select the brain or a department to chat with its lead.'
-            : 'Live progress of tasks delegated to department teams.'}
+          Click a department to expand its agents. Select the brain or a department to chat with
+          its lead — tasks appear live below.
         </p>
       </header>
 
-      {view === 'tasks' ? (
-        <div className="tasks-view">
-          <TasksBoard tasks={tasks} departments={departments} />
-        </div>
-      ) : (
-        <>
+      <div className="deck-body">
           <div className="stage">
             <svg viewBox="-120 -120 1240 1240" className="map" role="img" aria-label="Company agent map">
               {layout.map(({ dept, point }) => (
@@ -345,8 +347,17 @@ export default function App() {
               </>
             )}
           </aside>
-        </>
-      )}
+      </div>
+
+      <section className="deck-feed">
+        <div className="deck-feed-header">
+          <h2>Live Tasks</h2>
+          {runningCount > 0 && <span className="tab-badge">{runningCount}</span>}
+        </div>
+        <div className="deck-feed-body">
+          <TasksBoard tasks={tasks} departments={departments} variant="feed" />
+        </div>
+      </section>
     </div>
   )
 }
