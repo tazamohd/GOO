@@ -15,10 +15,10 @@ const BRAIN_ID = 'brain'
 
 const CENTER = 500
 const DEPT_RADIUS = 200
-const AGENT_RADIUS = 280
-const AGENT_RADIUS_TIERS = 4
-const AGENT_RADIUS_STAGGER = 55
-const MAX_AGENT_ARC_DEGREES = (360 / 7) * 0.88
+const AGENT_RADIUS = 300
+const AGENT_RADIUS_TIERS = 5
+const AGENT_RADIUS_STAGGER = 68
+const MAX_AGENT_ARC_DEGREES = (360 / 7) * 0.94
 
 function toPoint(angleDeg: number, radius: number) {
   const rad = (angleDeg - 90) * (Math.PI / 180)
@@ -32,14 +32,29 @@ function wrapLabel(name: string): string[] {
   return [words.slice(0, mid).join(' '), words.slice(mid).join(' ')]
 }
 
-const AGENT_LABEL_GAP = 23
-const AGENT_LABEL_LINE_HEIGHT = 10
+const AGENT_LABEL_GAP = 27
+const AGENT_LABEL_LINE_HEIGHT = 13
+const AGENT_LABEL_MIN_GAP = 12
+
+const VIEW_MIN = -155
+const VIEW_SIZE = 1310
+const VIEW_CENTER = VIEW_MIN + VIEW_SIZE / 2
+const HUB_PAD = 70
+const DEPT_PAD = 60
+const AGENT_LABEL_PAD_X = 140
+const AGENT_LABEL_PAD_Y = 60
+const VIEW_MARGIN = 1.12
 
 // Places a label on the side of the node facing away from the hub, so nodes
 // packed close together tangentially (e.g. departments on the left/right of
 // the circle, where radial spread barely changes x) don't collide: the label
 // runs alongside the node instead of needing symmetric clearance below it.
-function labelPlacement(angleDeg: number, lineCount: number) {
+//
+// `labelYOffset` comes from a per-department declutter pass (see `layout`)
+// that nudges side-anchored labels apart along y until none of their
+// (measured) bounding boxes touch, since angular order alone doesn't
+// guarantee vertical order once radius tiers are mixed in.
+function labelPlacement(angleDeg: number, lineCount: number, labelYOffset: number) {
   const rad = (angleDeg - 90) * (Math.PI / 180)
   const dx = Math.cos(rad)
   const dy = Math.sin(rad)
@@ -49,17 +64,60 @@ function labelPlacement(angleDeg: number, lineCount: number) {
     return {
       anchor,
       x: dx >= 0 ? AGENT_LABEL_GAP : -AGENT_LABEL_GAP,
-      firstY: (-(lineCount - 1) * AGENT_LABEL_LINE_HEIGHT) / 2 + 4,
+      firstY: (-(lineCount - 1) * AGENT_LABEL_LINE_HEIGHT) / 2 + 4 + labelYOffset,
     }
   }
   if (dy >= 0) {
-    return { anchor: 'middle' as const, x: 0, firstY: AGENT_LABEL_GAP + 3 }
+    return { anchor: 'middle' as const, x: 0, firstY: AGENT_LABEL_GAP + 3 + labelYOffset }
   }
   return {
     anchor: 'middle' as const,
     x: 0,
-    firstY: -(AGENT_LABEL_GAP - 8 + (lineCount - 1) * AGENT_LABEL_LINE_HEIGHT),
+    firstY: -(AGENT_LABEL_GAP - 8 + (lineCount - 1) * AGENT_LABEL_LINE_HEIGHT) + labelYOffset,
   }
+}
+
+// Pool Adjacent Violators: the standard algorithm for finding the
+// non-decreasing sequence closest (least squares) to a given sequence of
+// values. Used below to fit a monotonic curve to a set of weighted values.
+function poolAdjacentViolators(values: number[]): number[] {
+  const pools: { value: number; weight: number; count: number }[] = []
+  for (const raw of values) {
+    let value = raw
+    let weight = 1
+    let count = 1
+    while (pools.length > 0 && pools[pools.length - 1].value > value) {
+      const prev = pools.pop()!
+      value = (prev.value * prev.weight + value * weight) / (prev.weight + weight)
+      weight = prev.weight + weight
+      count = prev.count + count
+    }
+    pools.push({ value, weight, count })
+  }
+  const result: number[] = []
+  for (const pool of pools) {
+    for (let k = 0; k < pool.count; k++) result.push(pool.value)
+  }
+  return result
+}
+
+// Finds the y position for each label (given in naturalY order) that keeps
+// them in order with at least AGENT_LABEL_MIN_GAP between adjacent boxes,
+// while staying as close as possible overall to their natural positions.
+// This is isotonic regression: subtracting off the cumulative required gap
+// turns "keep at least this far apart" into a plain "keep non-decreasing"
+// constraint, which the pool-adjacent-violators algorithm solves exactly —
+// no greedy cascade that can run away and overshoot past a nearby node.
+function declutterY(items: { naturalY: number; height: number }[]): number[] {
+  const n = items.length
+  const cumulativeGap = new Array<number>(n).fill(0)
+  for (let i = 1; i < n; i++) {
+    const gap = items[i - 1].height / 2 + AGENT_LABEL_MIN_GAP + items[i].height / 2
+    cumulativeGap[i] = cumulativeGap[i - 1] + gap
+  }
+  const shifted = items.map((item, i) => item.naturalY - cumulativeGap[i])
+  const fitted = poolAdjacentViolators(shifted)
+  return fitted.map((y, i) => y + cumulativeGap[i] - items[i].naturalY)
 }
 
 function makeId() {
@@ -84,12 +142,91 @@ export default function App() {
       const agentPoints = dept.agents.map((agent, j) => {
         const start = angle - spread / 2
         const agentAngle = agentCount === 1 ? angle : start + (spread * j) / (agentCount - 1)
-        const radius = AGENT_RADIUS + (j % AGENT_RADIUS_TIERS) * AGENT_RADIUS_STAGGER
-        return { agent, angle: agentAngle, point: toPoint(agentAngle, radius) }
+        // Interleaved (not sequential) so angularly-adjacent agents land on
+        // maximally different tiers — j and j+1 would otherwise always be
+        // one stagger step apart, which is close enough for one label to
+        // reach into the next node's circle.
+        const tier = (j * 2) % AGENT_RADIUS_TIERS
+        const radius = AGENT_RADIUS + tier * AGENT_RADIUS_STAGGER
+        const point = toPoint(agentAngle, radius)
+        const rad = (agentAngle - 90) * (Math.PI / 180)
+        const dx = Math.cos(rad)
+        const dy = Math.sin(rad)
+        const isSide = Math.abs(dx) >= Math.abs(dy)
+        // Which quadrant of the node a label sits in — labels only ever
+        // compete for space with other labels in the *same* quadrant (a
+        // label to the right of one node can't collide with one below
+        // another), so decluttering per bucket avoids needlessly nudging
+        // labels that were never actually going to touch.
+        const bucket = isSide ? (dx >= 0 ? 'side-r' : 'side-l') : dy >= 0 ? 'vert-d' : 'vert-u'
+        const lineCount = wrapLabel(agent.name).length
+        const labelHeight = lineCount * AGENT_LABEL_LINE_HEIGHT
+        return { agent, angle: agentAngle, tier, point, bucket, labelHeight, labelYOffset: 0 }
       })
+
+      // Labels can end up close together even when their nodes' angular
+      // order looks fine, because radius tiers stagger nodes outward at
+      // different rates. Declutter each spatial bucket by actual rendered y
+      // so none of the (measured) label bounding boxes touch.
+      const buckets = new Map<string, number[]>()
+      agentPoints.forEach((ap, idx) => {
+        const list = buckets.get(ap.bucket) ?? []
+        list.push(idx)
+        buckets.set(ap.bucket, list)
+      })
+      for (const indices of buckets.values()) {
+        indices.sort((a, b) => agentPoints[a].point.y - agentPoints[b].point.y)
+        const offsets = declutterY(
+          indices.map((idx) => ({
+            naturalY: agentPoints[idx].point.y,
+            height: agentPoints[idx].labelHeight,
+          })),
+        )
+        indices.forEach((idx, i) => {
+          agentPoints[idx].labelYOffset = offsets[i]
+        })
+      }
+
       return { dept, angle, point: deptPoint, agentPoints }
     })
   }, [])
+
+  // The node layout is sized for the largest possible view (any department
+  // fully expanded), so most of the time — nothing expanded, or only one of
+  // seven departments expanded — actual content only fills a small corner of
+  // that space. Zoom the view to fit whatever's currently visible instead of
+  // always showing the full worst-case canvas.
+  const viewTransform = useMemo(() => {
+    let minX = CENTER - HUB_PAD
+    let maxX = CENTER + HUB_PAD
+    let minY = CENTER - HUB_PAD
+    let maxY = CENTER + HUB_PAD
+
+    for (const { point } of layout) {
+      minX = Math.min(minX, point.x - DEPT_PAD)
+      maxX = Math.max(maxX, point.x + DEPT_PAD)
+      minY = Math.min(minY, point.y - DEPT_PAD)
+      maxY = Math.max(maxY, point.y + DEPT_PAD)
+    }
+
+    const activeDept = layout.find(({ dept }) => dept.id === expanded)
+    if (activeDept) {
+      for (const { point } of activeDept.agentPoints) {
+        minX = Math.min(minX, point.x - AGENT_LABEL_PAD_X)
+        maxX = Math.max(maxX, point.x + AGENT_LABEL_PAD_X)
+        minY = Math.min(minY, point.y - AGENT_LABEL_PAD_Y)
+        maxY = Math.max(maxY, point.y + AGENT_LABEL_PAD_Y)
+      }
+    }
+
+    const size = Math.max(maxX - minX, maxY - minY) * VIEW_MARGIN
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+    const scale = VIEW_SIZE / size
+    const tx = VIEW_CENTER - cx * scale
+    const ty = VIEW_CENTER - cy * scale
+    return `translate(${tx}px, ${ty}px) scale(${scale})`
+  }, [layout, expanded])
 
   const isExpanded = (id: string) => expanded === id
 
@@ -189,7 +326,8 @@ export default function App() {
 
       <div className="deck-body">
           <div className="stage">
-            <svg viewBox="-120 -120 1240 1240" className="map" role="img" aria-label="Company agent map">
+            <svg viewBox="-155 -155 1310 1310" className="map" role="img" aria-label="Company agent map">
+              <g className="map-viewport" style={{ transform: viewTransform }}>
               {layout.map(({ dept, point }) => (
                 <line
                   key={`brain-${dept.id}`}
@@ -250,9 +388,9 @@ export default function App() {
                   </g>
 
                   {isExpanded(dept.id) &&
-                    agentPoints.map(({ agent, angle: agentAngle, point: ap }) => {
+                    agentPoints.map(({ agent, angle: agentAngle, labelYOffset, point: ap }) => {
                       const lines = wrapLabel(agent.name)
-                      const placement = labelPlacement(agentAngle, lines.length)
+                      const placement = labelPlacement(agentAngle, lines.length, labelYOffset)
                       return (
                         <g
                           key={agent.id}
@@ -267,7 +405,7 @@ export default function App() {
                           }}
                         >
                           <title>{agent.name}</title>
-                          <circle r={16} />
+                          <circle r={19} />
                           <text
                             y={placement.firstY}
                             style={{ textAnchor: placement.anchor }}
@@ -284,6 +422,7 @@ export default function App() {
                     })}
                 </g>
               ))}
+              </g>
             </svg>
           </div>
 
