@@ -5,13 +5,19 @@ import './TasksBoard.css'
 interface TasksBoardProps {
   tasks: Task[]
   departments: Department[]
+  variant?: 'grid' | 'feed'
 }
 
-export default function TasksBoard({ tasks, departments }: TasksBoardProps) {
+export default function TasksBoard({ tasks, departments, variant = 'grid' }: TasksBoardProps) {
   const deptById = new Map(departments.map((d) => [d.id, d]))
+  const isFeed = variant === 'feed'
 
   if (tasks.length === 0) {
-    return (
+    return isFeed ? (
+      <div className="tasks-empty tasks-empty-feed">
+        No active tasks — chat with the Orchestrator or a department to start one.
+      </div>
+    ) : (
       <div className="tasks-empty">
         <p>No tasks yet.</p>
         <p>
@@ -23,11 +29,15 @@ export default function TasksBoard({ tasks, departments }: TasksBoardProps) {
   }
 
   return (
-    <div className="tasks-board">
+    <div className={isFeed ? 'tasks-feed' : 'tasks-board'}>
       {tasks.map((task) => {
         const dept = deptById.get(task.departmentId)
         return (
-          <div key={task.id} className="task-card" style={{ ['--dept-color' as string]: dept?.color }}>
+          <div
+            key={task.id}
+            className={`task-card ${isFeed ? 'task-card-feed' : ''}`}
+            style={{ ['--dept-color' as string]: dept?.color }}
+          >
             <div className="task-card-header">
               <span className="task-dept">
                 {dept?.icon} {dept?.name}

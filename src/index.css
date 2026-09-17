@@ -4,6 +4,7 @@
   --bg: #0b0c10;
   --panel-bg: #14161d;
   --border: #262834;
+  --grid-line: rgba(255, 255, 255, 0.025);
 
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
