@@ -17,9 +17,9 @@ const BRAIN_ID = 'brain'
 
 const CENTER = 500
 const DEPT_RADIUS = 200
-const AGENT_RADIUS = 355
-const AGENT_RADIUS_TIERS = 3
-const AGENT_RADIUS_STAGGER = 40
+const AGENT_RADIUS = 280
+const AGENT_RADIUS_TIERS = 4
+const AGENT_RADIUS_STAGGER = 55
 const MAX_AGENT_ARC_DEGREES = (360 / 7) * 0.88
 
 function toPoint(angleDeg: number, radius: number) {
@@ -32,6 +32,36 @@ function wrapLabel(name: string): string[] {
   if (words.length < 2) return [name]
   const mid = Math.ceil(words.length / 2)
   return [words.slice(0, mid).join(' '), words.slice(mid).join(' ')]
+}
+
+const AGENT_LABEL_GAP = 23
+const AGENT_LABEL_LINE_HEIGHT = 10
+
+// Places a label on the side of the node facing away from the hub, so nodes
+// packed close together tangentially (e.g. departments on the left/right of
+// the circle, where radial spread barely changes x) don't collide: the label
+// runs alongside the node instead of needing symmetric clearance below it.
+function labelPlacement(angleDeg: number, lineCount: number) {
+  const rad = (angleDeg - 90) * (Math.PI / 180)
+  const dx = Math.cos(rad)
+  const dy = Math.sin(rad)
+
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    const anchor: 'start' | 'end' = dx >= 0 ? 'start' : 'end'
+    return {
+      anchor,
+      x: dx >= 0 ? AGENT_LABEL_GAP : -AGENT_LABEL_GAP,
+      firstY: (-(lineCount - 1) * AGENT_LABEL_LINE_HEIGHT) / 2 + 4,
+    }
+  }
+  if (dy >= 0) {
+    return { anchor: 'middle' as const, x: 0, firstY: AGENT_LABEL_GAP + 3 }
+  }
+  return {
+    anchor: 'middle' as const,
+    x: 0,
+    firstY: -(AGENT_LABEL_GAP - 8 + (lineCount - 1) * AGENT_LABEL_LINE_HEIGHT),
+  }
 }
 
 function makeId() {
@@ -58,7 +88,7 @@ export default function App() {
         const start = angle - spread / 2
         const agentAngle = agentCount === 1 ? angle : start + (spread * j) / (agentCount - 1)
         const radius = AGENT_RADIUS + (j % AGENT_RADIUS_TIERS) * AGENT_RADIUS_STAGGER
-        return { agent, point: toPoint(agentAngle, radius) }
+        return { agent, angle: agentAngle, point: toPoint(agentAngle, radius) }
       })
       return { dept, angle, point: deptPoint, agentPoints }
     })
@@ -157,7 +187,7 @@ export default function App() {
       ) : (
         <>
           <div className="stage">
-            <svg viewBox="0 0 1000 1000" className="map" role="img" aria-label="Company agent map">
+            <svg viewBox="-120 -120 1240 1240" className="map" role="img" aria-label="Company agent map">
               {layout.map(({ dept, point }) => (
                 <line
                   key={`brain-${dept.id}`}
@@ -218,29 +248,38 @@ export default function App() {
                   </g>
 
                   {isExpanded(dept.id) &&
-                    agentPoints.map(({ agent, point: ap }) => (
-                      <g
-                        key={agent.id}
-                        className={`node node-agent ${
-                          selected.kind === 'agent' && selected.agent.id === agent.id ? 'is-selected' : ''
-                        }`}
-                        style={{ ['--dept-color' as string]: dept.color }}
-                        transform={`translate(${ap.x}, ${ap.y})`}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setSelected({ kind: 'agent', department: dept, agent })
-                        }}
-                      >
-                        <circle r={20} />
-                        <text y={20 + 11} className="node-label node-label-agent">
-                          {wrapLabel(agent.name).map((line, li) => (
-                            <tspan key={li} x={0} dy={li === 0 ? 0 : 11}>
-                              {line}
-                            </tspan>
-                          ))}
-                        </text>
-                      </g>
-                    ))}
+                    agentPoints.map(({ agent, angle: agentAngle, point: ap }) => {
+                      const lines = wrapLabel(agent.name)
+                      const placement = labelPlacement(agentAngle, lines.length)
+                      return (
+                        <g
+                          key={agent.id}
+                          className={`node node-agent ${
+                            selected.kind === 'agent' && selected.agent.id === agent.id ? 'is-selected' : ''
+                          }`}
+                          style={{ ['--dept-color' as string]: dept.color }}
+                          transform={`translate(${ap.x}, ${ap.y})`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelected({ kind: 'agent', department: dept, agent })
+                          }}
+                        >
+                          <title>{agent.name}</title>
+                          <circle r={16} />
+                          <text
+                            y={placement.firstY}
+                            style={{ textAnchor: placement.anchor }}
+                            className="node-label node-label-agent"
+                          >
+                            {lines.map((line, li) => (
+                              <tspan key={li} x={placement.x} dy={li === 0 ? 0 : AGENT_LABEL_LINE_HEIGHT}>
+                                {line}
+                              </tspan>
+                            ))}
+                          </text>
+                        </g>
+                      )
+                    })}
                 </g>
               ))}
             </svg>

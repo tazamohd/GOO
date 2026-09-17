@@ -124,7 +124,7 @@
 }
 
 .node-label-agent {
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .node-brain circle {
@@ -166,6 +166,19 @@
   fill-opacity: 0.25;
   stroke-width: 2.5;
   stroke-opacity: 1;
+}
+
+/* Agent labels only render for the hovered or selected node: with many
+   agents packed into a narrow arc, showing every label at once collides
+   regardless of placement, so only one is ever visible at a time. */
+.node-agent .node-label-agent {
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.node-agent:hover .node-label-agent,
+.node-agent.is-selected .node-label-agent {
+  opacity: 1;
 }
 
 .node:hover circle {
